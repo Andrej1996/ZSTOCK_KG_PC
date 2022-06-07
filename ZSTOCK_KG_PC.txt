@@ -1,0 +1,1470 @@
+*&---------------------------------------------------------------------*
+*& Report  ZSTOCK_KG_PC
+*&
+*&---------------------------------------------------------------------*
+*& translated by SG
+*&
+*&---------------------------------------------------------------------*
+
+REPORT  zstock_kg_pc_v2 MESSAGE-ID zetem.
+TABLES: s835, makt, marm, vbak, mara, kna1,
+        zzstock_qlick, lfa1, vbap, t001w,
+        zbmw_material, vbbe, mkpf.
+
+DATA : ppp TYPE p LENGTH 10 DECIMALS 3.
+DATA : p1(3) TYPE c .
+DATA : p2(60) TYPE c.
+DATA : p3(30) TYPE c.
+DATA : c TYPE zdec53.
+DATA : d TYPE zdec53.
+DATA : g TYPE zdec53.
+DATA : n TYPE n.
+DATA : wa_qlick LIKE zzstock_qlick.
+DATA : bukrs TYPE bukrs.
+RANGES: r_bmwcode FOR mara-matnr.
+
+DATA leave_screen TYPE flag.
+
+DATA : p_date type sy-datum,
+       p_tolgort like s835-lgort,
+       p_headertext LIKE MKPF-BKTXT.
+
+DATA: i_mkpf type standard table of mkpf with header line.
+
+
+g = - 999.
+DATA: BEGIN OF i_stock OCCURS 0.
+        INCLUDE STRUCTURE zzstock.
+DATA:  bmeins          TYPE meins, "Base UoM
+       matkl           LIKE mara-matkl,
+       spart           LIKE mara-spart,
+       price           TYPE  zwhbpricesp2, "Price Unit
+       pric_pc         TYPE  zwhbpricesp2, "Price per PC
+       pric_m          TYPE  zwhbpricesp2, "Price per M
+       meins           TYPE  meins,
+       tot_pric        TYPE  zwhbpricesp2,
+       lifnr           LIKE lfa1-lifnr, "@dt20131030 +vendor
+       lname1          LIKE lfa1-name1, "@DT20131030 +NAME
+       zpackaging      LIKE mara-zpackaging,
+       kwmeng          LIKE vbap-kwmeng, "@dt200160520 + order's QTY
+       vrkme           LIKE vbap-vrkme,  "@dt200160520 + order's UoM
+       cust_pnum       TYPE zbmw_matnr, "@dt20170213 BMW code
+       zprnum          TYPE zprofil_no,              "@dt20170831
+       zcolourcategory TYPE zcolourcategory, "@dt20170831
+       zzadd_date3     LIKE vbap-zzadd_date3, "@dt20180924
+       erdat           LIKE vbap-erdat,
+       h_erdat         LIKE vbak-erdat, "Sales creation date
+       ersda           LIKE mara-ersda, "Material created on
+       send_pc         TYPE zz_pc,
+       send_kg         TYPE MBWBEST,
+       mblnr           TYPE mblnr,
+*       bktxt           TYPE bktxt,
+
+*       error_msg
+       END OF i_stock.
+*+DT20130124 <
+DATA: wpp_a     LIKE  mseg-menge,
+      wpp_n     LIKE  mseg-menge,
+      wa_temp   LIKE  mseg-menge,
+      no_actual TYPE  flag,
+      kg        TYPE  menge_d,
+      pc        TYPE  zzzz_zpc,
+      meter     TYPE  menge_d.
+DATA: zaccnt    LIKE  usr05-parva,
+      zit       LIKE  usr05-parva.
+
+*------------------- ALV DATA -------------------------------------*
+TYPE-POOLS: slis.
+DATA: col_pos       TYPE i,
+      fieldcat      TYPE slis_t_fieldcat_alv,
+      fieldcat2     TYPE slis_t_fieldcat_alv,
+      fieldcat_ln   LIKE LINE OF fieldcat,
+      sortcat       TYPE slis_t_sortinfo_alv,
+      sortcat_ln    LIKE LINE OF sortcat,
+      eventcat      TYPE slis_t_event,
+      layout        TYPE slis_layout_alv,
+      eventcat_ln   LIKE LINE OF eventcat,
+      heading       TYPE slis_t_listheader,
+      gt_index      LIKE sy-tabix,
+      gt_lines      LIKE sy-tabix,
+      g_variant     LIKE disvariant,
+      gx_variant    LIKE disvariant,
+      display_mode,
+      cname         LIKE usr41-terminal,
+      g_save(1)     TYPE c, g_exit(1) TYPE c,
+      nextline      LIKE sy-tabix VALUE 1,
+      gtitle(100)   TYPE c,
+*      ok_code       like rsmpe-func,
+      ok_code       LIKE sy-ucomm,
+      okcode        LIKE rsmpe-func,
+      listheader    TYPE slis_t_listheader,
+      listheader_ln LIKE LINE OF  listheader,
+      ls_layout     TYPE slis_layout_alv OCCURS 1 WITH HEADER LINE..
+
+DATA: gs_layout   TYPE  slis_layout_alv,
+      gt_fieldcat TYPE  slis_t_fieldcat_alv,
+      gs_variant  LIKE  disvariant.
+
+DATA: g_select   LIKE   rsparams OCCURS 0 WITH HEADER LINE,
+      g_info     LIKE rsel_info OCCURS 0 WITH HEADER LINE,
+      g_repid    LIKE rsvar-report,
+      c_pagno    LIKE sy-pagno,
+      wprice     LIKE  bapiesllc-gr_price,
+      diafora    LIKE vbrp-kzwi2,
+      savexr     LIKE tcurr-ukurs,
+      txtexr(10).
+DATA: ls_mkpf  TYPE imkpf,
+      ct_emseg LIKE emseg OCCURS 0 WITH HEADER LINE.
+DATA: it_imseg LIKE imseg OCCURS 0 WITH HEADER LINE,
+      is_imseg LIKE imseg OCCURS 0 WITH HEADER LINE.
+DATA: lv_posted TYPE  flag,
+      lv_mblnr1 TYPE  mblnr.
+
+DATA: ls_variant          LIKE disvariant.
+DATA: save_ok            LIKE sy-ucomm,
+      g_custom_container TYPE REF TO cl_gui_custom_container,
+      g_grid             TYPE REF TO cl_gui_alv_grid.
+
+*------------------------------------------------------------------*
+
+DATA r_ucomm LIKE sy-ucomm.
+
+DATA: usr_params TYPE REF TO zuser_params,
+      buk        TYPE bukrs.
+
+************ SELECT-OPTIONS ********************************
+**parameters: p_usr type XUBNAME.
+SELECT-OPTIONS : s_matnr FOR s835-matnr.
+SELECT-OPTIONS : s_werks FOR s835-werks OBLIGATORY.
+SELECT-OPTIONS : s_spart FOR mara-spart.
+SELECT-OPTIONS : s_lgort FOR s835-lgort.
+SELECT-OPTIONS : s_charg FOR s835-charg.
+SELECT-OPTIONS : s_vbeln FOR s835-vbeln.
+SELECT-OPTIONS : s_kunnr FOR vbak-kunnr.
+SELECT-OPTIONS : s_lifnr FOR lfa1-lifnr.
+SELECT-OPTIONS : s_bmwmat FOR zbmw_material-cust_pnum MATCHCODE OBJECT zsh_bmwmatnr.
+SELECTION-SCREEN SKIP 1.
+PARAMETERS: p_gjahr TYPE gjahr,
+            p_monat TYPE monat.
+SELECTION-SCREEN SKIP 1.
+PARAMETERS: p_upd AS CHECKBOX DEFAULT ' ',
+            p_del AS CHECKBOX DEFAULT ' '.
+
+PARAMETERS: p_bmw TYPE flag.
+
+INITIALIZATION.
+  CREATE OBJECT usr_params.
+*  buk = usr_params->get_buk( ).
+  CLEAR zaccnt.
+  CALL FUNCTION 'G_GET_USER_PARAMETER'
+    EXPORTING
+      parameter_id    = 'ZACCNT'
+    IMPORTING
+      parameter_value = zaccnt
+*     RC              =
+    .
+  LOOP AT SCREEN.
+    IF zaccnt <> 'X'.
+      IF screen-name = 'P_GJAHR' OR
+         screen-name = 'P_MONAT' OR
+         screen-name = '%_P_MONAT_%_APP_%-TEXT' OR
+         screen-name = '%_P_GJAHR_%_APP_%-TEXT'.
+        screen-active = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+*****
+  CLEAR zit.
+  CALL FUNCTION 'G_GET_USER_PARAMETER'
+    EXPORTING
+      parameter_id    = 'ZIT'
+    IMPORTING
+      parameter_value = zit
+*     RC              =
+    .
+  LOOP AT SCREEN.
+    IF zit <> 'X'.
+      IF screen-name = 'P_UPD' OR
+         screen-name = 'P_DEL' OR
+         screen-name = '%_P_UPD_%_APP_%-TEXT' OR
+         screen-name = '%_P_DEL_%_APP_%-TEXT'.
+        screen-active = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+AT SELECTION-SCREEN OUTPUT.
+
+  LOOP AT SCREEN.
+    IF zaccnt <> 'X'.
+      IF screen-name = 'P_GJAHR' OR
+         screen-name = 'P_MONAT' OR
+         screen-name = '%_P_MONAT_%_APP_%-TEXT' OR
+         screen-name = '%_P_GJAHR_%_APP_%-TEXT'.
+        screen-active = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+  LOOP AT SCREEN.
+    IF zit <> 'X'.
+      IF screen-name = 'P_UPD' OR
+         screen-name = 'P_DEL' OR
+         screen-name = '%_P_UPD_%_APP_%-TEXT' OR
+         screen-name = '%_P_DEL_%_APP_%-TEXT'.
+        screen-active = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+AT SELECTION-SCREEN.
+  PERFORM check_plant.
+  PERFORM check_bmwcode.
+
+
+START-OF-SELECTION.
+
+  PERFORM get_bmwcode.
+**  IF P_BMW IS NOT INITIAL.
+  SELECT * FROM s835 INTO CORRESPONDING FIELDS OF TABLE i_stock
+                     WHERE
+                         matnr IN s_matnr AND
+**                             MATNR IN R_BMWCODE AND "@DT20170213 BMW selection
+                           werks IN s_werks AND
+                           lgort IN s_lgort AND
+                           vbeln IN s_vbeln AND
+                           charg IN s_charg AND
+                           lifnr IN s_lifnr AND
+                           vrsio = '000'    AND
+                           sptag = '00000000'    AND  "@se20201112
+                           cmbwbest > 0.
+
+*    SELECT * FROM mkpf INTO CORRESPONDING FIELDS OF TABLE i_stock
+*                    WHERE MBLNR in s_matnr.
+**  ELSE.
+**    SELECT * FROM S835 INTO CORRESPONDING FIELDS OF TABLE I_STOCK
+**                     WHERE
+**                           MATNR IN S_MATNR AND
+***                           matnr in r_bmwcode and "@DT20170213 BMW selection
+**                           WERKS IN S_WERKS AND
+**                           LGORT IN S_LGORT AND
+**                           VBELN IN S_VBELN AND
+**                           CHARG IN S_CHARG AND
+**                           LIFNR IN S_LIFNR AND
+**                           VRSIO = '000' AND
+**                           CMBWBEST > 0.
+**
+**  ENDIF.
+  LOOP AT i_stock.
+    SELECT SINGLE * FROM mara WHERE matnr = i_stock-matnr.
+    IF mara-spart IN s_spart.
+      i_stock-spart = mara-spart.
+      i_stock-zpackaging = mara-zpackaging."@dt20160229
+      i_stock-zprnum = mara-zprnum.                  "@dt20170831
+      i_stock-zcolourcategory = mara-zcolourcategory."@dt20170831
+      i_stock-ersda = mara-ersda.
+      SELECT SINGLE * FROM makt WHERE
+      matnr = i_stock-matnr AND
+      spras = sy-langu.
+      i_stock-maktx = makt-maktx.
+      IF NOT i_stock-vbeln IS INITIAL.
+        CLEAR vbak.
+        SELECT SINGLE * FROM vbak WHERE
+          vbeln = i_stock-vbeln .
+        i_stock-kunnr = vbak-kunnr.
+*        i_stock-erdat = vbak-erdat.
+      ENDIF.
+      CLEAR kna1.
+      SELECT SINGLE * FROM kna1 WHERE
+        kunnr = i_stock-kunnr .
+      i_stock-name1 = kna1-name1.
+      CLEAR lfa1.
+      SELECT SINGLE * FROM lfa1 WHERE
+        lifnr = i_stock-lifnr.
+      i_stock-lname1 = lfa1-name1.
+
+      SELECT SINGLE * FROM mara WHERE
+        matnr = i_stock-matnr .
+      i_stock-zstandard_length = mara-zlength.
+      "@DT20170213 bmw material code<<
+      SELECT SINGLE * FROM zbmw_material
+                      WHERE matnr = i_stock-matnr .
+      i_stock-cust_pnum = zbmw_material-cust_pnum.
+      "@DT20170213 bmw material code>>
+      SELECT SINGLE * FROM marm WHERE
+      matnr = i_stock-matnr AND
+      meinh = 'ST'.
+
+*      SELECT SINGLE * FROM mkpf  WHERE MBLNR = i_stock-matnr.
+      SELECT * FROM mkpf INTO TABLE i_mkpf WHERE mblnr = i_stock-mblnr.
+
+*-DT20130124 <
+**    i_stock-zz_nominal = marm-umrez / marm-umren.
+**    CLEAR p1.
+**    p1 = i_stock-charg+1(3) .
+**
+**    break ccc00074.
+**
+**    IF p1 CO '0123456789'.
+**      MOVE p1(3) TO ppp.
+**      ppp = ppp / 100.
+**      i_stock-zlength = ppp.
+***      i_stock-zlength = i_stock-zlength / 100.
+**    ELSE.
+**      MOVE '0' TO i_stock-zlength.
+**    ENDIF.
+**
+**    IF i_stock-zz_pc  <> 0.
+**      CLEAR c.
+**      c = ABS( i_stock-cmbwbest / i_stock-zz_pc )  .
+**      IF c > 999 .
+**        c = 999.
+**      ENDIF.
+**
+**      i_stock-zz_average = c.
+**    ENDIF.
+**    CLEAR c.
+**    IF i_stock-zz_nominal <> 0.
+**      c = ABS( i_stock-zz_average - i_stock-zz_nominal ) /
+**      i_stock-zz_nominal * 100.
+**      IF i_stock-zstandard_length <> 0.
+**        c = c * i_stock-zlength / i_stock-zstandard_length.
+**      ENDIF.
+**      IF c > 999 .
+**        c = 999.
+**        n = 1.
+**      ENDIF.
+*-DT20130124 >
+*+DT20130124 <
+      CLEAR p1.
+      p1 = i_stock-charg+1(3) .
+
+      IF p1 CO '0123456789'.
+        MOVE p1(3) TO ppp.
+        ppp = ppp / 100.
+        i_stock-zlength = ppp.
+      ELSE.
+        MOVE '0' TO i_stock-zlength.
+      ENDIF.
+
+      CLEAR: wpp_a, wpp_n,
+             kg, pc, wa_temp.
+      DATA: lv_kunnr LIKE kna1-kunnr.
+      lv_kunnr = i_stock-kunnr.
+      IF NOT i_stock-vbeln IS INITIAL.
+        CLEAR lv_kunnr.
+      ENDIF.
+      CALL FUNCTION 'ZETEM_STOCK2UNITS_MATERIAL'
+        EXPORTING
+          werks = i_stock-werks
+          matnr = i_stock-matnr
+          lgort = i_stock-lgort
+          charg = i_stock-charg
+          kdauf = i_stock-vbeln
+          kdpos = i_stock-posnr
+          lifnr = i_stock-lifnr "@dt20130109
+          kunnr = lv_kunnr "@dt20130109
+*         WPP_OK          =
+        IMPORTING
+          wpp_a = wpp_a
+          wpp_n = wpp_n
+*         NO_ACTUAL       =
+          kg    = kg
+          pc    = pc.
+      .
+      IF wpp_a > 999.
+        wa_temp = 999.
+      ELSE.
+        MOVE wpp_a TO wa_temp.
+      ENDIF.
+      i_stock-zz_meter = i_stock-zz_pc * i_stock-zlength.
+      i_stock-zz_average = wa_temp.
+*Special case for Romania-asked by Croitoriu, Iustin on 21/8/2019
+* calculate average weight as it is. <<<
+      IF i_stock-werks = '9840'.
+        IF pc <> 0 AND wpp_a = wpp_n.
+          i_stock-zz_average = kg / pc.
+        ENDIF.
+      ENDIF.
+****>>>
+      MOVE wpp_n TO i_stock-zz_nominal.
+
+      IF i_stock-zz_nominal <> 0.
+        c = abs( i_stock-zz_average - i_stock-zz_nominal ) /
+        i_stock-zz_nominal * 100.
+        IF c > 999 .
+          c = 999.
+          n = 1.
+        ENDIF.
+*+DT20130124 >
+        i_stock-zz_dif = c.
+
+      ENDIF.
+*+DT20130408 GET PRICE <.
+      IF zaccnt = 'X'.
+        IF i_stock-werks(2) = '32' OR
+            i_stock-werks(2) = '31' OR
+*>>>dt@13.11.2018 09:56:12
+*I_STOCK-WERKS(2) = '85'.
+          i_stock-werks(2) = '85' OR i_stock-werks(2) = '82' OR
+          i_stock-werks(2) = '80' OR i_stock-werks(2) = '87'.
+*<<<dt@13.11.2018 09:56:12
+          CONCATENATE i_stock-werks(2) '00' INTO bukrs .
+        ELSE.
+          bukrs = i_stock-werks.
+        ENDIF.
+        IF NOT i_stock-charg IS INITIAL.
+          CALL FUNCTION 'ZWHB_GETPRICE'
+            EXPORTING
+              bukrs = bukrs
+              gjahr = p_gjahr
+              monat = p_monat
+*             BRANCH        = '0001'
+              matnr = i_stock-matnr
+*             BWTAR =
+              werks = i_stock-werks
+              charg = i_stock-charg
+            IMPORTING
+              price = i_stock-price
+              meins = i_stock-meins.
+        ELSE.
+          CALL FUNCTION 'ZWHB_GETPRICE'
+            EXPORTING
+              bukrs = bukrs
+              gjahr = p_gjahr
+              monat = p_monat
+**              BRANCH        = '0001'
+              matnr = i_stock-matnr
+*             BWTAR =
+              werks = i_stock-werks
+*              charg = i_stock-charg
+            IMPORTING
+              price = i_stock-price
+              meins = i_stock-meins.
+        ENDIF.
+
+        IF mara-spart <> '10'  AND
+            mara-spart <> '40'  AND
+             mara-spart <> '45'  AND
+              mara-spart <> '53'  AND
+               mara-spart <> '41'  AND
+                mara-spart <> '42'.
+
+          CLEAR i_stock-zz_pc.
+
+        ENDIF.
+        i_stock-matkl = mara-matkl.
+        i_stock-bmeins = mara-meins.
+
+* Get total price
+        IF i_stock-bmeins = 'ST'.
+          i_stock-tot_pric = i_stock-price * i_stock-zz_pc.
+          i_stock-pric_pc  = i_stock-price. "Value per PC
+        ELSEIF i_stock-bmeins = 'KG'.
+          i_stock-tot_pric = i_stock-price * i_stock-cmbwbest.
+          IF i_stock-zz_average < 0 OR i_stock-zz_average = 999.
+    i_stock-pric_pc  = i_stock-price * i_stock-zz_nominal. "Value per PC
+          ELSE.
+    i_stock-pric_pc  = i_stock-price * i_stock-zz_average. "Value per PC
+          ENDIF.
+        ENDIF.
+*@@@@@
+        IF i_stock-zlength > 0.
+        i_stock-pric_m = i_stock-pric_pc / i_stock-zlength. "Value per M
+        ENDIF.
+      ENDIF.
+*+DT20130408 GET PRICE >.
+*@20190724 get confirmed issues ....
+      CLEAR i_stock-vmeng.
+      CALL FUNCTION 'ZGET_RESERVED_STOCK'
+        EXPORTING
+          matnr         = i_stock-matnr
+          werks         = i_stock-werks
+          vbeln         = i_stock-vbeln
+          posnr         = i_stock-posnr
+       IMPORTING
+          vmeng         = i_stock-vmeng
+                .
+
+      i_stock-send_pc = i_stock-zz_pc.    "@se20201111
+      i_stock-send_kg = i_stock-cmbwbest. "@se20201111
+
+      IF i_stock-lgort IS INITIAL
+            AND i_stock-lifnr IS INITIAL
+         AND i_stock-kunnr IS INITIAL. "@dt20130109 include vendor stock
+        DELETE i_stock.
+      ELSE.
+        MODIFY i_stock.
+      ENDIF.
+    ELSE.
+      DELETE i_stock.
+    ENDIF.
+
+  ENDLOOP.
+
+*@DT20160520 <<<<
+  DATA wtabix LIKE sy-tabix.
+  LOOP AT i_stock WHERE vbeln <> ''.
+    wtabix = sy-tabix.
+    CLEAR vbap.
+    SELECT SINGLE kwmeng vrkme zzadd_date3 erdat
+           FROM vbap
+           INTO (i_stock-kwmeng, i_stock-vrkme,
+                  i_stock-zzadd_date3, i_stock-erdat)
+           WHERE vbeln = i_stock-vbeln
+             AND posnr = i_stock-posnr.
+    CLEAR i_stock-h_erdat.
+    SELECT SINGLE erdat INTO i_stock-h_erdat
+                   FROM vbak
+                   WHERE vbeln = i_stock-vbeln.
+
+    MODIFY i_stock INDEX wtabix TRANSPORTING kwmeng vrkme zzadd_date3
+                                             erdat h_erdat.
+
+  ENDLOOP.
+*@DT20160520 >>>>
+
+*+DT20130129 update Z table <
+  IF p_del = 'X'.
+    DELETE FROM zzstock_qlick.
+    COMMIT WORK AND WAIT.
+  ENDIF.
+
+  IF p_upd = 'X'.
+    LOOP AT i_stock.
+      MOVE-CORRESPONDING i_stock TO wa_qlick.
+      MODIFY zzstock_qlick FROM wa_qlick.
+    ENDLOOP.
+    COMMIT WORK AND WAIT.
+  ENDIF.
+*+DT20130129 update Z table >
+
+  IF p_upd = ' '.
+*    PERFORM display_data.
+    CHECK NOT i_stock[] IS INITIAL.
+    PERFORM display_data USING fieldcat[].
+  ENDIF.
+
+END-OF-SELECTION.
+
+**----------------------------------------------------------------------
+**
+**                        FORM display_data
+**
+**----------------------------------------------------------------------
+
+*----------------------------------------------------------------------*
+*                        FORM display_data                             *
+*----------------------------------------------------------------------*
+FORM display_data USING rt_fieldcat TYPE slis_t_fieldcat_alv.
+  DATA : na(1) VALUE space .
+
+  CLEAR fieldcat.
+
+  DATA: ls_fieldcat TYPE slis_fieldcat_alv.
+  CONSTANTS:  cut_zeros VALUE 'X'.
+***
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'SPART'.
+  ls_fieldcat-ref_fieldname = 'SPART'.
+  ls_fieldcat-ref_tabname   = 'MARA'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'WERKS'.
+  ls_fieldcat-ref_fieldname = 'WERKS'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'LGORT'.
+  ls_fieldcat-ref_fieldname = 'LGORT'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'MATNR'.
+  ls_fieldcat-ref_fieldname = 'MATNR'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'CHARG'.
+  ls_fieldcat-ref_fieldname = 'CHARG'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'MAKTX'.
+  ls_fieldcat-ref_fieldname = 'MAKTX'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'VBELN'.
+  ls_fieldcat-ref_fieldname = 'VBELN'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'POSNR'.
+  ls_fieldcat-ref_fieldname = 'POSNR'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'KWMENG'.
+  ls_fieldcat-ref_fieldname = 'KWMENG'.
+  ls_fieldcat-ref_tabname   = 'VBAP'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'VRKME'.
+  ls_fieldcat-ref_fieldname = 'VRKME'.
+  ls_fieldcat-ref_tabname   = 'VBAP'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'KUNNR'.
+  ls_fieldcat-ref_fieldname = 'KUNNR'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'NAME1'.
+  ls_fieldcat-ref_fieldname = 'NAME1'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'LIFNR'.
+  ls_fieldcat-ref_fieldname = 'LIFNR'.
+  ls_fieldcat-ref_tabname   = 'LFA1'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'NAME1'.
+  ls_fieldcat-ref_fieldname = 'NAME1'.
+  ls_fieldcat-ref_tabname   = 'LFA1'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'CMBWBEST'.
+  ls_fieldcat-ref_fieldname = 'CMBWBEST'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZ_PC'.
+  ls_fieldcat-ref_fieldname = 'ZZ_PC'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZ_AVERAGE'.
+  ls_fieldcat-ref_fieldname = 'ZZ_AVERAGE'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZ_NOMINAL'.
+  ls_fieldcat-ref_fieldname = 'ZZ_NOMINAL'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZ_DIF'.
+  ls_fieldcat-ref_fieldname = 'ZZ_DIF'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZLENGTH'.
+  ls_fieldcat-ref_fieldname = 'ZLENGTH'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZ_METER'.
+  ls_fieldcat-ref_fieldname = 'ZZ_METER'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZSTANDARD_LENGTH'.
+  ls_fieldcat-ref_fieldname = 'ZSTANDARD_LENGTH'.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZPACKAGING'.
+  ls_fieldcat-ref_fieldname = 'ZPACKAGING'.
+  ls_fieldcat-ref_tabname   = 'MARA'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZPRNUM'.
+  ls_fieldcat-ref_fieldname = 'ZPRNUM'.
+  ls_fieldcat-ref_tabname   = 'MARA'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZCOLOURCATEGORY'.
+  ls_fieldcat-ref_fieldname = 'ZCOLOURCATEGORY'.
+  ls_fieldcat-ref_tabname   = 'MARA'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ZZADD_DATE3'.  "@dt20180924
+  ls_fieldcat-ref_fieldname = 'ZZADD_DATE3'.
+  ls_fieldcat-ref_tabname   = 'VBAP'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ERDAT'.        "@dt20180924
+  ls_fieldcat-ref_fieldname = 'ERDAT'.
+  ls_fieldcat-ref_tabname   = 'VBAP'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ERDAT'.        "@dt20180924
+  ls_fieldcat-ref_fieldname = 'ERDAT'.
+  ls_fieldcat-ref_tabname   = 'VBAK'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  IF zaccnt = 'X'.
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'PRICE'.
+    ls_fieldcat-seltext_m     = text-h01.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'PRIC_PC'.
+    ls_fieldcat-seltext_m     = text-h05.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'PRIC_M'.
+    ls_fieldcat-seltext_m     = text-h06.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'TOT_PRIC'.
+    ls_fieldcat-seltext_m     = text-h04.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'BMEINS'.
+    ls_fieldcat-seltext_m     = text-h03.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'MATKL'.
+    ls_fieldcat-ref_fieldname = 'MATKL'.
+    ls_fieldcat-ref_tabname   = 'MARA'.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'CUST_PNUM'.
+    ls_fieldcat-ref_fieldname = 'CUST_PNUM'.
+    ls_fieldcat-ref_tabname   = 'ZBMW_MATERIAL'.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+    CLEAR ls_fieldcat.
+    ls_fieldcat-fieldname     = 'VMENG'.
+    ls_fieldcat-seltext_m     = text-t13.
+***
+    APPEND ls_fieldcat TO rt_fieldcat.
+
+
+  ENDIF.
+
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'ERSDA'.
+  ls_fieldcat-seltext_m     = text-t15.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'MBLNR'.
+  ls_fieldcat-seltext_l =  text-t16.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'SEND_PC'.
+  ls_fieldcat-seltext_m     = text-t17.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+  ls_fieldcat-ref_fieldname = 'ZZ_PC'.
+  ls_fieldcat-edit = 'X'.
+  ls_fieldcat-fix_column = 'X'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+  CLEAR ls_fieldcat.
+  ls_fieldcat-fieldname     = 'SEND_KG'.
+  ls_fieldcat-seltext_m     = text-t18.
+  ls_fieldcat-ref_tabname   = 'ZZSTOCK'.
+  ls_fieldcat-ref_fieldname = 'CMBWBEST'.
+  ls_fieldcat-edit = 'X'.
+  ls_fieldcat-fix_column = 'X'.
+***
+  APPEND ls_fieldcat TO rt_fieldcat.
+****---------------------------------------
+
+
+  PERFORM alv_sort USING '1' 'WERKS' 'X' ' ' 'X'.
+  PERFORM alv_build_layout USING layout.
+  PERFORM alv_build_event_catalog.
+  PERFORM alv_start_viewer.
+
+ENDFORM.                    " extra_function
+*---------------------------------------------------------------------*
+*                   FORM alv_build_event_catalog
+*---------------------------------------------------------------------*
+FORM alv_build_event_catalog.
+
+  CLEAR eventcat_ln.
+  CALL FUNCTION 'REUSE_ALV_EVENTS_GET'
+    EXPORTING
+      i_list_type = 0
+    IMPORTING
+      et_events   = eventcat.
+
+
+* TOP-OF-PAGE
+  READ TABLE eventcat WITH KEY name =  slis_ev_top_of_page
+                          INTO eventcat_ln.
+  IF sy-subrc = 0.
+    MOVE 'TOP_OF_PAGE' TO eventcat_ln-form.
+    APPEND eventcat_ln TO eventcat.
+  ENDIF.
+
+* SET_PF_STATUS
+  READ TABLE eventcat WITH KEY name =  slis_ev_pf_status_set
+                          INTO eventcat_ln.
+  IF sy-subrc = 0.
+    MOVE 'SET_PF_STATUS' TO eventcat_ln-form.
+    APPEND eventcat_ln TO eventcat.
+  ENDIF.
+
+* AT_USER_COMMAND
+  READ TABLE eventcat WITH KEY name =  slis_ev_user_command
+                          INTO eventcat_ln.
+  IF sy-subrc = 0.
+    MOVE 'AT_USER_COMMAND' TO eventcat_ln-form.
+    APPEND eventcat_ln TO eventcat.
+  ENDIF.
+
+ENDFORM.                    " build_event_catalog
+
+*---------------------------------------------------------------------*
+*                        FORM top_of_page                             *
+*---------------------------------------------------------------------*
+FORM top_of_page.
+
+  CLEAR: listheader_ln, listheader[].
+
+  CLEAR listheader_ln.
+  listheader_ln-typ  = 'H'.
+  listheader_ln-info = sy-title.
+  APPEND listheader_ln TO listheader.
+
+  CLEAR listheader_ln.
+  listheader_ln-typ  = 'S'.
+  listheader_ln-key  = text-h01.
+  CONCATENATE : sy-datum+6(2) '.' sy-datum+4(2) '.' sy-datum(4)
+                        INTO listheader_ln-info.
+  APPEND listheader_ln TO listheader.
+
+  CALL FUNCTION 'REUSE_ALV_COMMENTARY_WRITE'
+    EXPORTING
+*     i_logo             = 'TEKA_LOGO'
+      it_list_commentary = listheader.
+
+
+
+ENDFORM.                    "top_of_page
+
+*---------------------------------------------------------------------*
+*                     FORM alv_build_fieldcat                         *
+*---------------------------------------------------------------------*
+FORM alv_build_fieldcat USING ref_tabname
+                          ref_fieldname tabname fieldname
+                          key ftext hotspot outlen
+                          icon just dosum decs nozero uom.
+
+  ADD 1 TO col_pos.
+  fieldcat_ln-ref_tabname   = ref_tabname.
+  fieldcat_ln-ref_fieldname = ref_fieldname.
+  fieldcat_ln-tabname       = tabname.
+  fieldcat_ln-fieldname     = fieldname.
+  fieldcat_ln-key           = key.
+  fieldcat_ln-col_pos       = col_pos.
+  fieldcat_ln-no_out        = ' '.
+  fieldcat_ln-no_zero       = nozero.
+  fieldcat_ln-seltext_l     = ftext.
+  fieldcat_ln-seltext_m     = ftext.
+  fieldcat_ln-seltext_s     = ftext.
+  fieldcat_ln-ddictxt       = 'L'.     " (S)hort (M)iddle (L)ong
+  fieldcat_ln-hotspot       = hotspot.
+  fieldcat_ln-qfieldname    = uom.
+  fieldcat_ln-outputlen     = outlen.
+  fieldcat_ln-icon          = icon.
+  fieldcat_ln-just          = just.
+  fieldcat_ln-do_sum        = dosum.
+  IF NOT decs = space.
+    fieldcat_ln-decimals_out  = decs.
+  ENDIF.
+  APPEND fieldcat_ln TO fieldcat.
+
+ENDFORM.                    "alv_build_fieldcat
+
+*----------------------------------------------------------------------*
+*                      FORM alv_build_layout                           *
+*----------------------------------------------------------------------*
+FORM alv_build_layout  USING e05_ls_layout TYPE slis_layout_alv.
+
+  e05_ls_layout-zebra               = 'X'.
+  e05_ls_layout-numc_sum            = ' '.  "x
+  e05_ls_layout-detail_popup        = 'X'. "x
+  e05_ls_layout-colwidth_optimize   = 'X'.
+  e05_ls_layout-get_selinfos        = 'X'. "x
+  e05_ls_layout-confirmation_prompt = space.
+  e05_ls_layout-totals_text         = text-s01.
+  e05_ls_layout-subtotals_text      = text-s02.
+  e05_ls_layout-totals_only         = ' '.
+  e05_ls_layout-no_keyfix           = space.
+  e05_ls_layout-box_fieldname       = 'SEL'.
+  e05_ls_layout-box_tabname         = i_stock.
+  e05_ls_layout-def_status          = 'A'.
+
+ENDFORM.                    "alv_build_layout
+
+*---------------------------------------------------------------------*
+*                      FORM alv_start_viewer                          *
+*---------------------------------------------------------------------*
+FORM alv_start_viewer.
+
+  DATA: ls_glay TYPE lvc_s_glay.
+  DATA: pgm LIKE sy-repid.
+  pgm = sy-repid.
+  gtitle = pgm.
+
+  g_variant-report   = g_repid.
+  g_variant-username = sy-uname.
+
+  ls_glay-edt_cll_cb = 'X'.
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      I_INTERFACE_CHECK        = ''
+      i_callback_program       = pgm
+      i_callback_pf_status_set = 'SET_PF_STATUS'
+      i_callback_user_command  = 'AT_USER_COMMAND'
+      is_layout                = layout
+      it_fieldcat              = fieldcat
+*      it_sort                  = sortcat
+      is_variant               = g_variant
+      i_save                   = 'A'
+      it_events                = eventcat[]
+      i_grid_settings          = ls_glay
+    TABLES
+      t_outtab                 = i_stock
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
+ENDFORM.                    "alv_start_viewer
+
+*---------------------------------------------------------------------*
+*                          FORM header_list                           *
+*---------------------------------------------------------------------*
+FORM alv_header_list USING    p_typ
+                              p_txt1
+                              p_var1
+                              p_var2
+                              p_txt2.
+
+  DATA: w_txt1(60), w_txt2(50),w_txt3(50), w_txt4(50), w_txt5(50).
+  DATA: w_info LIKE listheader_ln-info.
+
+  CLEAR: listheader_ln, w_info.
+  WRITE: p_typ   TO w_txt1,
+         p_txt1  TO w_txt2,
+         p_var1  TO w_txt3,
+         p_var2  TO w_txt4,
+         p_txt2  TO w_txt5.
+
+  CONCATENATE  w_txt2 w_txt3 w_txt5 w_txt4 INTO w_info
+                                    SEPARATED BY space.
+
+  listheader_ln-typ = p_typ.
+  listheader_ln-info = w_info.
+  APPEND listheader_ln TO listheader.
+
+ENDFORM.                    " HEADER_LIST
+
+*----------------------------------------------------------------------*
+*                        FORM alv_fcat_merge                           *
+*----------------------------------------------------------------------*
+FORM alv_fcat_merge USING p_tabname p_repid.
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name         = p_repid
+      i_internal_tabname     = p_tabname
+      i_inclname             = p_repid
+      i_bypassing_buffer     = 'X'
+      i_buffer_active        = space
+    CHANGING
+      ct_fieldcat            = fieldcat
+    EXCEPTIONS
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+           WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " alv_fcat_merge
+
+*---------------------------------------------------------------------*
+*                         FORM alv_sort                               *
+*---------------------------------------------------------------------*
+FORM alv_sort USING spos
+                    fldn
+                    lup
+                    ldwn
+                    stot.
+
+  CLEAR sortcat_ln.
+  sortcat_ln-spos      = spos.
+  sortcat_ln-fieldname = fldn.
+  sortcat_ln-up        = lup.
+  sortcat_ln-down      = ldwn.
+  sortcat_ln-subtot    = stot.
+
+  APPEND  sortcat_ln TO sortcat.
+
+ENDFORM.                                                    " alv_sort
+
+*---------------------------------------------------------------------*
+*                       FORM SET_PF_STATUS                            *
+*---------------------------------------------------------------------*
+FORM set_pf_status USING rt_extab TYPE slis_t_extab.
+
+  FREE: rt_extab .
+  SET PF-STATUS 'ZST8' EXCLUDING rt_extab .
+
+ENDFORM.                    "set_pf_status
+
+*----------------------------------------------------------------------*
+*                     Form  AT_USER_COMMAND                            *
+*----------------------------------------------------------------------*
+FORM at_user_command USING r_ucomm LIKE sy-ucomm
+                        rs_selfield TYPE slis_selfield.     "#EC CALLED
+
+
+  DATA : temp_matnr LIKE bdcdata-fval,
+         temp_werks LIKE bdcdata-fval.
+  CLEAR i_stock.
+
+   rs_selfield-refresh = 'X'.
+
+  CASE r_ucomm.
+*    WHEN '&IC1'.
+*      CASE rs_selfield-fieldname.
+*        WHEN 'ZPRNUM'.
+*          CLEAR itab.
+*          READ TABLE itab INDEX rs_selfield-tabindex.
+*          IF NOT itab-matnr IS INITIAL.
+*            SET PARAMETER ID: 'MAT' FIELD itab-matnr.
+*            SET PARAMETER ID: 'WRK' FIELD  '3210'.
+*            CALL TRANSACTION 'MD04' AND SKIP FIRST SCREEN.
+*          ELSE.
+*            CLEAR mara.
+*            SELECT SINGLE * FROM mara  WHERE zprnum = itab-zprnum
+*                                       AND  zalloy = itab-zalloy
+*                                       AND  ztemper = itab-ztemper
+*                                       AND zpackaging ='O'
+*                                       AND lvorm = ''.
+*            IF sy-subrc = 0.
+*              SET PARAMETER ID: 'MAT' FIELD mara-matnr.
+*              SET PARAMETER ID: 'WRK' FIELD  '3210' .
+*              CALL TRANSACTION 'MD04' AND SKIP FIRST SCREEN.
+*
+*
+*            ENDIF.
+*
+*          ENDIF.
+*        WHEN 'MATNR_MF'.
+*          CLEAR itab.
+*          READ TABLE itab INDEX rs_selfield-tabindex.
+*          IF NOT itab-matnr_mf IS INITIAL.
+*            SET PARAMETER ID: 'MAT' FIELD itab-matnr_mf.
+*            SET PARAMETER ID: 'WRK' FIELD '3210'.
+*            CALL TRANSACTION 'MD04' AND SKIP FIRST SCREEN.
+*          ENDIF.
+*
+*        WHEN OTHERS.
+*      ENDCASE.
+*
+*    WHEN 'CR_ORD'.
+*      CLEAR itab.
+*      CLEAR : temp_matnr, temp_werks.
+*      LOOP AT itab WHERE sel = 'X'.
+*        temp_matnr = itab-matnr.
+*        temp_werks = '3210'.
+*        CALL FUNCTION 'ZBI_CO01'
+*          EXPORTING
+*            ctu                      = 'X'
+*            mode                     = 'A'
+*            UPDATE                   = 'L'
+**         GROUP                    =
+**         USER                     =
+**         KEEP                     =
+**         HOLDDATE                 =
+**         NODATA                   = '/'
+*            matnr_001                = temp_matnr
+*            werks_002                = temp_werks
+*            gamng_003                = '1'
+*            gmein_004                = 'KG'
+**         GLUZP_005                = '00:00'
+**         GSUZP_006                = '00:00'
+**         TERKZ_007                = '4'
+**         FHORI_008                = '000'
+**         VERSION_SEL_01_009       = 'X'
+**       IMPORTING
+**         SUBRC                    =
+**       TABLES
+**         MESSTAB                  =
+*                  .
+*      ENDLOOP.
+    WHEN '&TRANSFER'.
+
+      LOOP AT i_stock WHERE sel = 'X'.
+      ENDLOOP.
+
+      CHECK sy-subrc = 0.
+
+      p_date = sy-datum.
+
+      CALL SCREEN 500  STARTING AT '5' '5'.
+      CHECK leave_screen IS INITIAL.
+      CHECK NOT p_date IS INITIAL.
+
+      IF p_tolgort IS INITIAL.
+        MESSAGE text-001 TYPE 'W'.
+        EXIT.
+      ENDIF.
+
+      PERFORM transfer.
+
+       rs_selfield-refresh = 'X'.
+
+    WHEN '&CALC_PC'.
+      rs_selfield-refresh = 'X'.
+      LOOP AT i_stock WHERE sel = 'X'.
+        IF i_stock-send_kg <> 0 AND i_stock-zz_average <> 0.
+          i_stock-send_pc = i_stock-send_kg / i_stock-zz_average.
+          MODIFY i_stock TRANSPORTING send_pc.
+        ENDIF.
+      ENDLOOP.
+
+    WHEN '&CALC_KG'.
+      rs_selfield-refresh = 'X'.
+      LOOP AT i_stock WHERE sel = 'X'.
+        IF i_stock-send_pc <> 0.
+          i_stock-send_kg = i_stock-send_pc * i_stock-zz_average.
+          MODIFY i_stock TRANSPORTING send_kg.
+        ENDIF.
+      ENDLOOP.
+
+    WHEN OTHERS.
+*
+  ENDCASE.
+ENDFORM.                    "at_user_command
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_PLANT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_plant .
+** if p_usr is not initial.
+**   usr_params->set_usr( p_usr ).
+**   usr_params->set_buk( ).
+** endif.
+  IF NOT s_werks IS INITIAL.
+    SELECT * FROM t001w WHERE werks IN s_werks.
+      IF usr_params->get_auth( t001w-werks ) <> 1.
+        MESSAGE e044 WITH t001w-werks.
+      ENDIF.
+    ENDSELECT.
+  ENDIF.
+ENDFORM.                    " CHECK_PLANT
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_BMWCODE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_bmwcode .
+  DATA: no_rows TYPE i.
+  CHECK NOT s_bmwmat IS INITIAL.
+  SELECT COUNT(*) FROM zbmw_material
+                 INTO no_rows
+                 WHERE cust_pnum IN s_bmwmat.
+  IF no_rows < 1.
+    MESSAGE e398(00) WITH text-e01.
+  ENDIF.
+ENDFORM.                    " CHECK_BMWCODE
+*&---------------------------------------------------------------------*
+*&      Form  GET_BMWCODE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_bmwcode .
+  CHECK p_bmw = 'X'.
+  DATA: lv_matnr TYPE matnr.
+
+  REFRESH r_bmwcode.
+
+  r_bmwcode = 'IEQ'.
+  SELECT mara~matnr FROM zbmw_material
+              INNER JOIN mara ON mara~matnr = zbmw_material~matnr
+              INTO lv_matnr
+              WHERE zbmw_material~cust_pnum IN s_bmwmat.
+    r_bmwcode-low = lv_matnr.
+    APPEND r_bmwcode TO s_matnr.
+  ENDSELECT.
+  IF sy-subrc <> 0 . CLEAR r_bmwcode. ENDIF.
+
+
+ENDFORM.                    " GET_BMWCODE
+
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0500  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0500 INPUT.
+**  data: okcode like sy-ucomm.
+
+  ok_code = sy-ucomm.
+  CLEAR : sy-ucomm, leave_screen.
+  CASE ok_code.
+    WHEN 'OK500'.
+      LEAVE TO SCREEN 0.
+    WHEN 'CANC500'.
+      leave_screen = 'X'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0500  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE status_0500 OUTPUT.
+  SET PF-STATUS 'ZZZZ'.
+  SET TITLEBAR 'TITLE_0500'.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Form  TRANSFER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM TRANSFER .
+
+DATA : i_ummat    type ummat,
+       i_charg_to type migo_umcha,
+       i_kg       type menge_d,
+       i_pc       type zz_pc.
+
+DATA : e_ok       type flag, wa_makt type makt,
+       mblnr1     type mblnr,
+       t_emseg    type table of  emseg with header line,
+       wa_message type /eacc/t_bapiret2,
+       bktxt1     type mkpf-bktxt.
+
+DATA : gt_return type table of bapiret2,
+       wa_return type bapiret2.
+
+
+  LOOP AT i_stock WHERE sel = 'X'.
+
+  CLEAR : i_kg, i_pc, gt_return, gt_return[], wa_return, mblnr1, t_emseg, t_emseg[].
+  MOVE i_stock-send_kg TO i_kg.
+  MOVE i_stock-send_pc TO i_pc.
+
+
+  CALL FUNCTION 'ZETM_TRANSFER_LGORT'
+    EXPORTING
+      budat      = p_date
+      i_matnr    = i_stock-matnr
+      i_matnr_to = i_ummat
+      i_plant    = i_stock-werks
+      i_frlgort  = i_stock-lgort
+      i_tolgort  = p_tolgort
+      i_pc       = i_pc
+      i_kg       = i_kg
+      i_charg    = i_stock-charg
+      i_charg_to = i_charg_to
+      i_bwart    = '311'
+      i_kdauf    = i_stock-vbeln
+      i_kdpos    = i_stock-posnr
+      i_headertext = i_mkpf-BKTXT
+    IMPORTING
+      e_ok       = e_ok
+      mblnr1     = mblnr1
+    TABLES
+      t_emseg    = t_emseg.
+*      t_mkpf     = t_mkpf.
+
+    modify table i_mkpf.
+
+*    CALL FUNCTION 'MB_CHANGE_DOCUMENT'
+*      TABLES
+*        ZMKPF         =  i_mkpf
+*        ZMSEG         =  t_emseg
+              .
+
+
+
+  LOOP AT t_emseg.
+    MOVE-CORRESPONDING t_emseg TO wa_return.
+
+    wa_return-message_v1 = t_emseg-msgv1.
+    wa_return-message_v2 = t_emseg-msgv2.
+    wa_return-message_v3 = t_emseg-msgv3.
+    wa_return-id = t_emseg-msgid.
+    wa_return-number = t_emseg-msgno.
+    wa_return-type  = t_emseg-msgty.
+    wa_return-message = t_emseg-msgv1.
+
+    APPEND wa_return TO gt_return.
+
+  ENDLOOP.
+
+*  LOOP AT t_mkpf.
+*    MOVE-CORRESPONDING t_mkpf TO wa_return.
+*    t_mkpf-bktxt = p_headertext.
+*    APPEND t_mkpf TO t_mkpf.
+*    endloop.
+
+
+  IF mblnr1 IS NOT INITIAL.
+    wa_return-number = '060'.
+    wa_return-id = 'M7'.
+    wa_return-type  = 'S'.
+    wa_return-message_v1 = mblnr1.
+    APPEND wa_return TO gt_return.
+
+    i_stock-mblnr = mblnr1.
+    MODIFY i_stock.
+  ENDIF.
+
+  CALL FUNCTION 'FINB_BAPIRET2_DISPLAY'
+    EXPORTING
+      it_message = gt_return.
+
+
+  ENDLOOP.
+
+ENDFORM.
